@@ -1,0 +1,76 @@
+# ==============================================================================
+# Configuration: CNN-Enhanced ASR Training Pipeline for Reading Fluency Assessment
+# Target: 3%–5% WER on LibriSpeech test-clean
+# Hardware: 4x NVIDIA RTX A5000 (DDP Parallelism)
+# ==============================================================================
+
+system:
+  seed: 42
+  num_workers: 4
+  pin_memory: true
+  mixed_precision: "bfloat16" # "bfloat16", "float16", or "float32"
+  checkpoint_dir: "checkpoints/best_model"
+
+data:
+  dataset_root: "dataset/LibriSpeech"
+  train_split: "train-clean-100"
+  val_split: "dev-clean"
+  test_split: "test-clean"
+  sample_rate: 16000
+  bucketing:
+    enabled: true
+    num_buckets: 10
+  augmentation:
+    specaug_freq_mask: 15
+    specaug_time_mask: 20
+    noise_prob: 0.3
+    noise_snr_min: 15.0
+    noise_snr_max: 30.0
+
+model:
+  backbone:
+    name: "facebook/wav2vec2-base-960h"
+    freeze_epochs: 10
+    feature_dim: 768
+  cnn:
+    in_channels: 1
+    channels: [32, 64, 128]
+    kernel_size: 3
+    stride: 1
+    padding: 1
+    pool_kernel: [1, 2] # Preserves temporal resolution (Time, Feature/2)
+    pool_stride: [1, 2]
+    projection_dim: 512
+  rnn:
+    hidden_size: 256
+    num_layers: 2
+    bidirectional: true
+    dropout: 0.2
+  dense:
+    hidden_dim: 256
+    dropout: 0.3
+  vocab_size: 29
+
+training:
+  total_epochs: 10
+  batch_size: 4 # Per GPU (Global effective batch = 4 * 4 GPUs * 4 accum_steps = 64)
+  grad_accum_steps: 4
+  stage1:
+    lr: 3.0e-4
+    warmup_epochs: 1
+    weight_decay: 0.01
+  stage2:
+    backbone_lr: 1.0e-5
+    head_lr: 1.0e-4
+    weight_decay: 0.01
+  max_grad_norm: 5.0
+  ctc_blank_idx: 0
+  eval_every_epochs: 1
+  save_best_metric: "wer"
+
+decoding:
+  beam_width: 100
+  alpha: 0.5 # KenLM weight
+  beta: 1.5  # Word insertion bonus
+  lm_path: "lm/4-gram.binary" # Fast binary KenLM language model path
+
